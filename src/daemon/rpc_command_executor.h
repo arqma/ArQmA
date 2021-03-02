@@ -88,6 +88,8 @@ public:
 
   bool print_blockchain_info(uint64_t start_block_index, uint64_t end_block_index);
 
+  bool print_quorum_state(uint64_t height);
+
   bool set_log_level(int8_t level);
 
   bool set_log_categories(const std::string &categories);
@@ -162,9 +164,19 @@ public:
 
   bool check_blockchain_pruning();
 
-  bool rpc_payments();
-  
   bool print_net_stats();
+
+  bool print_sn_key();
+
+  bool print_sn_status();
+
+  bool print_sr(uint64_t height);
+
+  bool prepare_registration();
+
+  bool print_sn(const std::vector<std::string> &args);
+
+  bool pop_blocks(size_t num_blocks_to_pop);
 };
 
 } // namespace daemonize

@@ -72,15 +72,17 @@ typedef struct mdb_txn_cursors
 
   MDB_cursor *m_txc_hf_versions;
 
+  MDB_cursor *m_txc_service_node_data;
+
   MDB_cursor *m_txc_properties;
 } mdb_txn_cursors;
 
-#define m_cur_blocks	m_cursors->m_txc_blocks
+#define m_cur_blocks            m_cursors->m_txc_blocks
 #define m_cur_block_heights	m_cursors->m_txc_block_heights
 #define m_cur_block_info	m_cursors->m_txc_block_info
 #define m_cur_output_txs	m_cursors->m_txc_output_txs
 #define m_cur_output_amounts	m_cursors->m_txc_output_amounts
-#define m_cur_txs	m_cursors->m_txc_txs
+#define m_cur_txs               m_cursors->m_txc_txs
 #define m_cur_txs_pruned	m_cursors->m_txc_txs_pruned
 #define m_cur_txs_prunable	m_cursors->m_txc_txs_prunable
 #define m_cur_txs_prunable_hash	m_cursors->m_txc_txs_prunable_hash
@@ -90,8 +92,9 @@ typedef struct mdb_txn_cursors
 #define m_cur_spent_keys	m_cursors->m_txc_spent_keys
 #define m_cur_txpool_meta	m_cursors->m_txc_txpool_meta
 #define m_cur_txpool_blob	m_cursors->m_txc_txpool_blob
-#define m_cur_alt_blocks  m_cursors->m_txc_alt_blocks
+#define m_cur_alt_blocks        m_cursors->m_txc_alt_blocks
 #define m_cur_hf_versions	m_cursors->m_txc_hf_versions
+#define m_cur_service_node_data m_cursors->m_txc_service_node_data
 #define m_cur_properties	m_cursors->m_txc_properties
 
 typedef struct mdb_rflags
@@ -114,6 +117,7 @@ typedef struct mdb_rflags
   bool m_rf_txpool_blob;
   bool m_rf_alt_blocks;
   bool m_rf_hf_versions;
+  bool m_rf_service_node_data;
   bool m_rf_properties;
 } mdb_rflags;
 
@@ -272,8 +276,7 @@ public:
   virtual void get_output_key(const epee::span<const uint64_t> &amounts, const std::vector<uint64_t> &offsets, std::vector<output_data_t> &outputs, bool allow_partial = false) const;
 
   virtual tx_out_index get_output_tx_and_index_from_global(const uint64_t& index) const;
-  virtual void get_output_tx_and_index_from_global(const std::vector<uint64_t> &global_indices,
-      std::vector<tx_out_index> &tx_out_indices) const;
+  virtual void get_output_tx_and_index_from_global(const std::vector<uint64_t> &global_indices, std::vector<tx_out_index> &tx_out_indices) const;
 
   virtual tx_out_index get_output_tx_and_index(const uint64_t& amount, const uint64_t& index) const;
   virtual void get_output_tx_and_index(const uint64_t& amount, const std::vector<uint64_t> &offsets, std::vector<tx_out_index> &indices) const;
@@ -441,6 +444,10 @@ private:
 
   void cleanup_batch();
 
+  virtual void set_service_node_data(const std::string &data);
+  virtual void get_service_node_data(std::string &data);
+  virtual void clear_service_node_data();
+
 private:
   MDB_env* m_env;
 
@@ -468,6 +475,8 @@ private:
 
   MDB_dbi m_hf_starting_heights;
   MDB_dbi m_hf_versions;
+
+  MDB_dbi m_service_node_data;
 
   MDB_dbi m_properties;
 

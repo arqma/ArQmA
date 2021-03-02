@@ -31,11 +31,10 @@
 
 #pragma once
 #include <boost/asio/io_service.hpp>
-
+#include <boost/function/function_fwd.hpp>
 #if BOOST_VERSION >= 107400
 #include <boost/serialization/library_version_type.hpp>
 #endif
-
 #include <boost/serialization/serialization.hpp>
 #include <boost/serialization/version.hpp>
 #include <boost/serialization/list.hpp>
@@ -48,7 +47,6 @@
 #include <functional>
 #include <unordered_map>
 #include <unordered_set>
-
 
 #include "arqma_mq/zmq.hpp"
 
@@ -67,6 +65,7 @@
 #include "cryptonote_basic/hardfork.h"
 #include "blockchain_db/blockchain_db.h"
 
+namespace service_nodes { class service_node_list; class deregister_vote_pool; }
 namespace tools { class Notify; }
 
 namespace cryptonote
@@ -112,12 +111,36 @@ namespace cryptonote
       uint64_t already_generated_coins; //!< the total coins minted after that block
     };
 
+    class BlockAddedHook
+    {
+    public:
+      virtual void block_added(const block& block, const std::vector<transaction>& txs) = 0;
+    };
+
+    class BlockchainDetachedHook
+    {
+    public:
+      virtual void blockchain_detached(uint64_t height) = 0;
+    };
+
+    class InitHook
+    {
+    public:
+      virtual void init() = 0;
+    };
+
+    class ValidateMinerTxHook
+    {
+    public:
+      virtual bool validate_miner_tx(const crypto::hash& prev_id, const cryptonote::transaction& miner_tx, uint64_t height, int hard_fork_version, block_reward_parts const &reward_parts) const = 0;
+    };
+
     /**
      * @brief Blockchain constructor
      *
      * @param tx_pool a reference to the transaction pool to be kept by the Blockchain
      */
-    Blockchain(tx_memory_pool& tx_pool);
+    Blockchain(tx_memory_pool& tx_pool, service_nodes::service_node_list& service_node_list, service_nodes::deregister_vote_pool &deregister_vote_pool);
 
     /**
      * @brief Initialize the Blockchain state
@@ -452,7 +475,7 @@ namespace cryptonote
      *
      * @return true if a block found in common or req_start_block specified, else false
      */
-    bool find_blockchain_supplement(const uint64_t req_start_block, const std::list<crypto::hash>& qblock_ids, std::vector<std::pair<std::pair<cryptonote::blobdata, crypto::hash>, std::vector<std::pair<crypto::hash, cryptonote::blobdata> > > >& blocks, uint64_t& total_height, uint64_t& start_height, bool pruned, bool get_miner_tx_hash, size_t max_count) const;
+    bool find_blockchain_supplement(const uint64_t req_start_block, const std::list<crypto::hash>& qblock_ids, std::vector<std::pair<std::pair<cryptonote::blobdata, crypto::hash>, std::vector<std::pair<crypto::hash, cryptonote::blobdata>>>>& blocks, uint64_t& total_height, uint64_t& start_height, bool pruned, bool get_miner_tx_hash, size_t max_count) const;
 
     /**
      * @brief retrieves a set of blocks and their transactions, and possibly other transactions
@@ -566,7 +589,7 @@ namespace cryptonote
      *
      * @return false if any input is invalid, otherwise true
      */
-    bool check_tx_inputs(transaction& tx, uint64_t& pmax_used_block_height, crypto::hash& max_used_block_id, tx_verification_context &tvc, bool kept_by_block = false) const;
+    bool check_tx_inputs(transaction& tx, uint64_t& pmax_used_block_height, crypto::hash& max_used_block_id, tx_verification_context &tvc, bool kept_by_block = false);
 
     /**
      * @brief get fee quantization mask
@@ -771,6 +794,12 @@ namespace cryptonote
      * @brief Put DB in safe sync mode
      */
     void safesyncmode(const bool onoff);
+
+    /**
+     * @brief Get the nettype
+     * @return the nettype
+     */
+    network_type nettype() const { return m_nettype; }
 
     /**
      * @brief set whether or not to show/print time statistics
@@ -992,6 +1021,8 @@ namespace cryptonote
     bool update_blockchain_pruning();
     bool check_blockchain_pruning();
 
+    bool calc_batched_governance_reward(uint64_t height, uint64_t &reward) const;
+
     void lock();
     void unlock();
 
@@ -1010,6 +1041,14 @@ namespace cryptonote
      * @param nblocks number of blocks to be removed
      */
     void pop_blocks(uint64_t nblocks);
+
+    /**
+     * @brief add a hook for processing new blocks and rollbacks for reorgs
+     */
+    void hook_block_added(BlockAddedHook& block_added_hook);
+    void hook_blockchain_detached(BlockchainDetachedHook& blockchain_detached_hook);
+    void hook_init(InitHook& init_hook);
+    void hook_validate_miner_tx(ValidateMinerTxHook& validate_miner_tx_hook);
 
     /**
      * @brief checks whether a given block height is included in the precompiled block hash area
@@ -1042,6 +1081,9 @@ namespace cryptonote
 
     tx_memory_pool& m_tx_pool;
 
+    service_nodes::service_node_list& m_service_node_list;
+    service_nodes::deregister_vote_pool& m_deregister_vote_pool;
+
     mutable epee::critical_section m_blockchain_lock; // TODO: add here reader/writer lock
 
     // main chain
@@ -1051,6 +1093,7 @@ namespace cryptonote
     // metadata containers
     std::unordered_map<crypto::hash, std::unordered_map<crypto::key_image, std::vector<output_data_t>>> m_scan_table;
     std::unordered_map<crypto::hash, crypto::hash> m_blocks_longhash_table;
+    std::unordered_map<crypto::hash, std::unordered_map<crypto::key_image, bool>> m_check_txin_table;
 
     // SHA-3 hashes for each block and for fast pow checking
     std::vector<std::pair<crypto::hash, crypto::hash>> m_blocks_hash_of_hashes;
@@ -1085,6 +1128,10 @@ namespace cryptonote
     // some invalid blocks
     blocks_ext_by_hash m_invalid_blocks;     // crypto::hash -> block_extended_info
 
+    std::vector<BlockAddedHook*> m_block_added_hooks;
+    std::vector<BlockchainDetachedHook*> m_blockchain_detached_hooks;
+    std::vector<InitHook*> m_init_hooks;
+    std::vector<ValidateMinerTxHook*> m_validate_miner_tx_hooks;
 
     checkpoints m_checkpoints;
     bool m_enforce_dns_checkpoints;
@@ -1192,7 +1239,7 @@ namespace cryptonote
      *
      * @return false if any validation step fails, otherwise true
      */
-    bool check_tx_inputs(transaction& tx, tx_verification_context &tvc, uint64_t* pmax_used_block_height = NULL) const;
+    bool check_tx_inputs(transaction& tx, tx_verification_context &tvc, uint64_t* pmax_used_block_height = NULL);
 
     /**
      * @brief performs a blockchain reorganization according to the longest chain rule
@@ -1310,7 +1357,7 @@ namespace cryptonote
      *
      * @return false if anything is found wrong with the miner transaction, otherwise true
      */
-    bool validate_miner_transaction(const block& b, size_t cumulative_block_weight, uint64_t fee, uint64_t& base_reward, uint64_t already_generated_coins, bool &partial_block_reward, uint8_t version);
+    bool validate_miner_transaction(const block& b, size_t cumulative_block_weight, uint64_t fee, uint64_t& base_reward, uint64_t already_generated_coins, bool &partial_block_reward, uint8_t hard_fork_version);
 
     /**
      * @brief reverts the blockchain to its previous state following a failed switch
@@ -1357,7 +1404,7 @@ namespace cryptonote
      *
      * @return true if spendable, otherwise false
      */
-    bool is_tx_spendtime_unlocked(uint64_t unlock_time) const;
+    bool is_output_spendtime_unlocked(uint64_t unlock_time) const;
 
     /**
      * @brief stores an invalid block in a separate container

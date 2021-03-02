@@ -291,9 +291,9 @@ namespace rpc
     cryptonote_connection_context fake_context = AUTO_VAL_INIT(fake_context);
     tx_verification_context tvc = AUTO_VAL_INIT(tvc);
 
-    if(!m_core.handle_incoming_tx({tx_blob, crypto::null_hash}, tvc, false, false, !relay) || tvc.m_verifivation_failed)
+    if(!m_core.handle_incoming_tx({tx_blob, crypto::null_hash}, tvc, false, false, !relay) || tvc.m_verification_failed)
     {
-      if (tvc.m_verifivation_failed)
+      if (tvc.m_verification_failed)
       {
         MERROR("[SendRawTx]: tx verification failed");
       }
@@ -337,6 +337,11 @@ namespace rpc
       {
         if (!res.error_details.empty()) res.error_details += " and ";
         res.error_details = "fee too low";
+      }
+      if(tvc.m_invalid_version)
+      {
+        if(!res.error_details.empty()) res.error_details += " and ";
+        res.error_details = "tx version below 2 is invalid and forbidden";
       }
       if (res.error_details.empty())
       {
@@ -845,7 +850,7 @@ namespace rpc
 
   void DaemonHandler::handle(const GetOutputHistogram::Request& req, GetOutputHistogram::Response& res)
   {
-    std::map<uint64_t, std::tuple<uint64_t, uint64_t, uint64_t> > histogram;
+    std::map<uint64_t, std::tuple<uint64_t, uint64_t, uint64_t>> histogram;
     try
     {
       histogram = m_core.get_blockchain_storage().get_output_histogram(req.amounts, req.unlocked, req.recent_cutoff);

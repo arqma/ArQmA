@@ -56,21 +56,19 @@ namespace cryptonote
   /*                                                                      */
   /************************************************************************/
 
-  //! pair of <transaction fee, transaction hash> for organization
-  typedef std::pair<std::pair<double, std::time_t>, crypto::hash> tx_by_fee_and_receive_time_entry;
+  //! tuple of <deregister, transaction fee, receive time> for organization
+  typedef std::pair<std::tuple<bool, double, std::time_t>, crypto::hash> tx_by_fee_and_receive_time_entry;
 
   class txCompare
   {
   public:
     bool operator()(const tx_by_fee_and_receive_time_entry& a, const tx_by_fee_and_receive_time_entry& b) const
     {
-      // sort by greatest first, not least
-      if (a.first.first > b.first.first) return true;
-      else if (a.first.first < b.first.first) return false;
-      else if (a.first.second < b.first.second) return true;
-      else if (a.first.second > b.first.second) return false;
-      else if (a.second != b.second) return true;
-      else return false;
+      std::string ahash(a.second.data, sizeof(a.second.data));
+      std::string bhash(b.second.data, sizeof(b.second.data));
+      //      prioritize      deregister             fee                    arrival time          hash
+      return std::make_tuple(!std::get<0>(a.first), -std::get<1>(a.first), std::get<2>(a.first), ahash)
+           < std::make_tuple(!std::get<0>(b.first), -std::get<1>(b.first), std::get<2>(b.first), bhash);
     }
   };
 
@@ -231,7 +229,7 @@ namespace cryptonote
      *
      * @return true
      */
-    bool fill_block_template(block &bl, size_t median_weight, uint64_t already_generated_coins, size_t &total_weight, uint64_t &fee, uint64_t &expected_reward, uint8_t version);
+    bool fill_block_template(block &bl, size_t median_weight, uint64_t already_generated_coins, size_t &total_weight, uint64_t &fee, uint64_t &expected_reward, uint8_t version, uint64_t height);
 
     /**
      * @brief get a list of all transactions in the pool
@@ -461,6 +459,13 @@ namespace cryptonote
     bool have_tx_keyimg_as_spent(const crypto::key_image& key_im) const;
 
     /**
+     * @brief check if the deregistration tx already exists in the pool.
+     * @return true if it already exists
+     *
+     */
+    bool have_deregister_tx_already(transaction const &tx) const;
+
+    /**
      * @brief check if any spent key image in a transaction is in the pool
      *
      * Checks if any of the spent key images in a given transaction are present
@@ -541,7 +546,7 @@ namespace cryptonote
      *  transaction on the assumption that the original will not be in a
      *  block again.
      */
-    typedef std::unordered_map<crypto::key_image, std::unordered_set<crypto::hash> > key_images_container;
+    typedef std::unordered_map<crypto::key_image, std::unordered_set<crypto::hash>> key_images_container;
 
 #if defined(DEBUG_CREATE_BLOCK_TEMPLATE)
 public:

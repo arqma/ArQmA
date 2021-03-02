@@ -158,6 +158,71 @@ bool t_command_parser_executor::print_blockchain_info(const std::vector<std::str
   return m_executor.print_blockchain_info(start_index, end_index);
 }
 
+bool t_command_parser_executor::print_quorum_state(const std::vector<std::string>& args)
+{
+  if(args.size() != 1)
+  {
+    std::cout << "need block height parameter" << std::endl;
+    return false;
+  }
+
+  uint64_t height = 0;
+  if(!epee::string_tools::get_xtype_from_string(height, args[0]))
+  {
+    std::cout << "wrong block height parameter" << std::endl;
+    return false;
+  }
+
+  return m_executor.print_quorum_state(height);
+}
+
+bool t_command_parser_executor::print_sn_key(const std::vector<std::string>& args)
+{
+  if(!args.empty())
+    return false;
+  bool result = m_executor.print_sn_key();
+  return result;
+}
+
+bool t_command_parser_executor::print_sr(const std::vector<std::string>& args)
+{
+  if(args.size() != 1)
+  {
+    std::cout << "Expected 1 argument, <height>, received: " << args.size() << std::endl;
+    return false;
+  }
+
+  uint64_t height = 0;
+  if(!epee::string_tools::get_xtype_from_string(height, args[0]))
+  {
+    std::cout << "Wrong height given" << std::endl;
+    return false;
+  }
+
+  bool result = m_executor.print_sr(height);
+  return result;
+}
+
+bool t_command_parser_executor::prepare_registration()
+{
+  bool result = m_executor.prepare_registration();
+  return result;
+}
+
+bool t_command_parser_executor::print_sn(const std::vector<std::string>& args)
+{
+  bool result = m_executor.print_sn(args);
+  return result;
+}
+
+bool t_command_parser_executor::print_sn_status(const std::vector<std::string>& args)
+{
+  if(!args.empty())
+    return false;
+  bool result = m_executor.print_sn_status();
+  return result;
+}
+
 bool t_command_parser_executor::set_log_level(const std::vector<std::string>& args)
 {
   if(args.size() > 1)
@@ -466,12 +531,12 @@ bool t_command_parser_executor::out_peers(const std::vector<std::string>& args)
       set = true;
     }
   }
-  
+
   catch(const std::exception& ex) {
     _erro("stoi exception");
     return false;
   }
-  
+
   return m_executor.out_peers(set, limit);
 }
 
@@ -487,12 +552,12 @@ bool t_command_parser_executor::in_peers(const std::vector<std::string>& args)
       set = true;
     }
   }
-  
+
   catch(const std::exception& ex) {
     _erro("stoi exception");
     return false;
   }
-  
+
   return m_executor.in_peers(set, limit);
 }
 
@@ -753,13 +818,6 @@ bool t_command_parser_executor::pop_blocks(const std::vector<std::string>& args)
   return false;
 }
 
-bool t_command_parser_executor::rpc_payments(const std::vector<std::string>& args)
-{
-  if (args.size() != 0) return false;
-
-  return m_executor.rpc_payments();
-}
-
 bool t_command_parser_executor::version(const std::vector<std::string>& args)
 {
   std::cout << "ArQmA '" << ARQMA_RELEASE_NAME << "' (v" << ARQMA_VERSION_FULL << ")" << std::endl;
@@ -787,6 +845,27 @@ bool t_command_parser_executor::prune_blockchain(const std::vector<std::string>&
 bool t_command_parser_executor::check_blockchain_pruning(const std::vector<std::string>& args)
 {
   return m_executor.check_blockchain_pruning();
+}
+
+bool t_command_parser_executor::pop_blocks(const std::vector<std::string>& args)
+{
+  if(args.size() != 1)
+    return false;
+
+  size_t num_blocks_to_pop;
+  if(!epee::string_tools::get_xtype_from_string(num_blocks_to_pop, args[0]))
+  {
+    std::cout << "wrong starter block index parameter" << std::endl;
+    return false;
+  }
+
+  bool result = m_executor.pop_blocks(num_blocks_to_pop);
+  if(result)
+  {
+    raise(SIGTERM);
+  }
+
+  return result;
 }
 
 } // namespace daemonize

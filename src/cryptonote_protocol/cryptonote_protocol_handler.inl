@@ -230,7 +230,6 @@ namespace cryptonote
         cnx.port = std::to_string(cntxt.m_remote_address.as<epee::net_utils::ipv4_network_address>().port());
       }
       cnx.rpc_port = cntxt.m_rpc_port;
-      cnx.rpc_credits_per_hash = cntxt.m_rpc_credits_per_hash;
 
       std::stringstream peer_id_str;
       peer_id_str << std::hex << std::setw(16) << peer_id;
@@ -351,7 +350,7 @@ namespace cryptonote
       uint64_t max_block_height = std::max(hshd.current_height,m_core.get_current_blockchain_height());
       // Need to be fill in when we will know correct fork values
       uint64_t last_block_v10 = m_core.get_nettype() == TESTNET ? 30 : m_core.get_nettype() == MAINNET ? 61250 : 500;
-      uint64_t last_block_v15 = m_core.get_nettype() == TESTNET ? 90 : m_core.get_nettype() == MAINNET ? (uint64_t)-1 : 52000;
+      uint64_t last_block_v15 = m_core.get_nettype() == TESTNET ? 90 : m_core.get_nettype() == MAINNET ? (uint64_t)-1 : 12800;
       uint64_t diff_v11 = max_block_height > last_block_v10 ? std::min(abs_diff, max_block_height - last_block_v10) : 0;
       uint64_t diff_v16 = max_block_height > last_block_v15 ? std::min(abs_diff, max_block_height - last_block_v15) : 0;
 
@@ -432,7 +431,7 @@ namespace cryptonote
     {
       cryptonote::tx_verification_context tvc = AUTO_VAL_INIT(tvc);
       m_core.handle_incoming_tx(*tx_blob_it, tvc, true, true, false);
-      if(tvc.m_verifivation_failed)
+      if(tvc.m_verification_failed)
       {
         LOG_PRINT_CCONTEXT_L1("Block verification failed: transaction verification failed, dropping connection");
         drop_connection(context, false, false);
@@ -451,7 +450,7 @@ namespace cryptonote
       return 1;
     }
     m_core.resume_mine();
-    if(bvc.m_verifivation_failed)
+    if(bvc.m_verification_failed)
     {
       LOG_PRINT_CCONTEXT_L0("Block verification failed, dropping connection");
       drop_connection(context, true, false);
@@ -596,7 +595,7 @@ namespace cryptonote
           {
             MDEBUG("Incoming tx " << tx_hash << " not in pool, adding");
             cryptonote::tx_verification_context tvc = AUTO_VAL_INIT(tvc);
-            if(!m_core.handle_incoming_tx(tx_blob, tvc, true, true, false) || tvc.m_verifivation_failed)
+            if(!m_core.handle_incoming_tx(tx_blob, tvc, true, true, false) || tvc.m_verification_failed)
             {
               LOG_PRINT_CCONTEXT_L1("Block verification failed: transaction verification failed, dropping connection");
               drop_connection(context, false, false);
@@ -726,7 +725,7 @@ namespace cryptonote
         }
         m_core.resume_mine();
 
-        if(bvc.m_verifivation_failed)
+        if(bvc.m_verification_failed)
         {
           LOG_PRINT_CCONTEXT_L0("Block verification failed, dropping connection");
           drop_connection(context, true, false);
@@ -769,6 +768,17 @@ namespace cryptonote
       return 1;
     }
 
+    return 1;
+  }
+  //------------------------------------------------------------------------------------------------------------------------
+  template<class t_core>
+  int t_cryptonote_protocol_handler<t_core>::handle_uptime_proof(int command, NOTIFY_UPTIME_PROOF::request& arg, cryptonote_connection_context& context)
+  {
+    MLOG_P2P_MESSAGE("Received NOTIFY_UPTIME_PROOF");
+    if(context.m_state != cryptonote_connection_context::state_normal)
+      return 1;
+    if(m_core.handle_uptime_proof(arg))
+      relay_uptime_proof(arg, context);
     return 1;
   }
   //------------------------------------------------------------------------------------------------------------------------
@@ -855,6 +865,50 @@ namespace cryptonote
   }
   //------------------------------------------------------------------------------------------------------------------------
   template<class t_core>
+  int t_cryptonote_protocol_handler<t_core>::handle_notify_new_deregister_vote(int command, NOTIFY_NEW_DEREGISTER_VOTE::request& arg, cryptonote_connection_context& context)
+  {
+    MLOG_P2P_MESSAGE("Received NOTIFY_NEW_DEREGISTER_VOTE (" << arg.votes.size() << " txes)");
+
+    if(context.m_state != cryptonote_connection_context::state_normal)
+      return 1;
+
+    if(!is_synchronized())
+    {
+      LOG_DEBUG_CC(context, "Received new deregister vote while syncing, ignored");
+      return 1;
+    }
+
+    for(auto it = arg.votes.begin(); it != arg.votes.end();)
+    {
+      cryptonote::vote_verification_context vvc = {};
+      m_core.add_deregister_vote(*it, vvc);
+
+      if(vvc.m_verification_failed)
+      {
+        LOG_PRINT_CCONTEXT_L1("Deregister vote verification failed, dropping connection");
+        drop_connection(context, false /*add_fail*/, false /*flush_all_spans i.e. delete cached block data from this peer*/);
+        return 1;
+      }
+
+      if(vvc.m_added_to_pool)
+      {
+        it++;
+      }
+      else
+      {
+        it = arg.votes.erase(it);
+      }
+    }
+
+    if(arg.votes.size())
+    {
+      relay_deregister_votes(arg, context);
+    }
+
+    return 1;
+  }
+  //------------------------------------------------------------------------------------------------------------------------
+  template<class t_core>
   int t_cryptonote_protocol_handler<t_core>::handle_notify_new_transactions(int command, NOTIFY_NEW_TRANSACTIONS::request& arg, cryptonote_connection_context& context)
   {
     MLOG_P2P_MESSAGE("Received NOTIFY_NEW_TRANSACTIONS (" << arg.txs.size() << " txes)");
@@ -877,7 +931,7 @@ namespace cryptonote
     {
       cryptonote::tx_verification_context tvc = AUTO_VAL_INIT(tvc);
       m_core.handle_incoming_tx({arg.txs[i], crypto::null_hash}, tvc, false, true, false);
-      if(tvc.m_verifivation_failed)
+      if(tvc.m_verification_failed)
       {
         LOG_PRINT_CCONTEXT_L1("Tx verification failed, dropping connection");
         drop_connection(context, false, false);
@@ -1340,7 +1394,7 @@ namespace cryptonote
             std::vector<tx_blob_entry>::const_iterator it = block_entry.txs.begin();
             for (size_t i = 0; i < tvc.size(); ++i, ++it)
             {
-              if(tvc[i].m_verifivation_failed)
+              if(tvc[i].m_verification_failed)
               {
                 if (!m_p2p->for_connection(span_connection_id, [&](cryptonote_connection_context& context, nodetool::peerid_type peer_id, uint32_t f)->bool{
                   cryptonote::transaction tx;
@@ -1381,7 +1435,7 @@ namespace cryptonote
 
             m_core.handle_incoming_block(block_entry.block, pblocks.empty() ? NULL : &pblocks[blockidx], bvc, false); // <--- process block
 
-            if(bvc.m_verifivation_failed)
+            if(bvc.m_verification_failed)
             {
               if (!m_p2p->for_connection(span_connection_id, [&](cryptonote_connection_context& context, nodetool::peerid_type peer_id, uint32_t f)->bool{
                 LOG_PRINT_CCONTEXT_L1("Block verification failed, dropping connection");
@@ -2349,7 +2403,7 @@ skip:
     fluffy_arg.b.txs = fluffy_txs;
 
     // sort peers between fluffy ones and others
-    std::vector<std::pair<epee::net_utils::zone, boost::uuids::uuid> > fullConnections, fluffyConnections;
+    std::vector<std::pair<epee::net_utils::zone, boost::uuids::uuid>> fullConnections, fluffyConnections;
     m_p2p->for_each_connection([this, &exclude_context, &fullConnections, &fluffyConnections](connection_context& context, nodetool::peerid_type peer_id, uint32_t support_flags)
     {
       if (peer_id && exclude_context.m_connection_id != context.m_connection_id && context.m_remote_address.get_zone() == epee::net_utils::zone::public_)
@@ -2383,6 +2437,14 @@ skip:
     }
 
     return true;
+  }
+  //------------------------------------------------------------------------------------------------------------------------
+  template<class t_core>
+  bool t_cryptonote_protocol_handler<t_core>::relay_deregister_votes(NOTIFY_NEW_DEREGISTER_VOTE::request& arg, cryptonote_connection_context& context)
+  {
+    bool result = post_notify<NOTIFY_NEW_DEREGISTER_VOTE>(arg, context);
+    m_core.set_deregister_votes_relayed(arg.votes);
+    return result;
   }
   //------------------------------------------------------------------------------------------------------------------------
   template<class t_core>
@@ -2426,7 +2488,7 @@ skip:
         arg._.resize(arg._.size() - remove);
       // if the size of _ moved enough, we might lose byte in size encoding, we don't care
     }
-    std::vector<std::pair<epee::net_utils::zone, boost::uuids::uuid> > connections;
+    std::vector<std::pair<epee::net_utils::zone, boost::uuids::uuid>> connections;
     m_p2p->for_each_connection([hide_tx_broadcast, &exclude_context, &connections](connection_context& context, nodetool::peerid_type peer_id, uint32_t support_flags)
     {
       const epee::net_utils::zone current_zone = context.m_remote_address.get_zone();
@@ -2521,6 +2583,12 @@ skip:
     if (n_out_peers >= m_max_out_peers)
       return false;
     return true;
+  }
+  //------------------------------------------------------------------------------------------------------------------------
+  template<class t_core>
+  bool t_cryptonote_protocol_handler<t_core>::relay_uptime_proof(NOTIFY_UPTIME_PROOF::request& arg, cryptonote_connection_context& context)
+  {
+    return post_notify<NOTIFY_UPTIME_PROOF>(arg, context);
   }
   //------------------------------------------------------------------------------------------------------------------------
   template<class t_core>
